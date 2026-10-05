@@ -1,0 +1,181 @@
+# Що має бути на дорозі, щоб офіційне питання відповідало сцені.
+# Формат: nID: токени   # примітка
+# Токени:
+#   sign:X[|Y]   знак X (або Y) видно в точці або до 2 клітинок попереду/позаду
+#   plate:TEXT   табличка під знаком (T-1, T-5 …)
+#   xwalk        «зебра» попереду; junction — перехрестя попереду; tee — ти на «ніжці» Т-перехрестя
+#   rondo        рондо попереду; rail — переїзд попереду
+#   left|right|straight  маневр маршруту на найближчому перехресті
+#   ped wheel cane cyc scooter moto bus schoolbus truck train pedroad
+#                пішохід / візок / незрячий / велосипедист / самокат / мотоцикл / автобус / шкільний автобус /
+#                вантажівка / потяг / пішоходи йдуть проїжджою частиною
+#   carR carL carX onc ahead parked   авто праворуч / ліворуч / на поперечній / зустрічне / попереду / припарковані
+#   country city highway snow night fog   середовище, якщо питання від нього залежить
+#   gen          загальне знання: фото/схема/піктограма самодостатні, сцена не важлива
+# НЕ ПІДТРИМУЄТЬСЯ (питання не ставимо на карті, доки не збудуємо):
+#   light (світлофори)  tram  lanes (кілька смуг в один бік / перестроювання)  police (регулювальник)
+#   emerg (спецтранспорт)  bridge  tunnel
+
+# --- 00
+n12942: sign:D-42
+n2866: sign:D-42
+n13243: sign:D-42
+n8300: xwalk ped
+n13404: xwalk wheel           # без фото: особа з інвалідністю на переході
+n13529: xwalk wheel
+n13446: xwalk light
+n13411: xwalk ped
+n898: sign:A-5
+n3904: sign:A-5
+n6086: sign:A-5 junction
+n13391: sign:D-15
+n1459: sign:D-15
+n13553: bus                   # без фото: зупинка без острівця, пасажири виходять на дорогу
+# --- 01
+n3642: sign:B-25
+n3643: sign:B-25
+n2841: sign:B-25
+n13750: sign:B-25
+n13752: sign:B-25
+n9633: sign:B-23
+n1517: sign:B-23
+n9564: sign:B-35 country      # узбіччя
+n1541: sign:B-36
+n3426: sign:B-36
+n8098: sign:B-36
+n8103: sign:B-36
+# --- 02
+n1592: sign:B-36
+n7543: left
+n10702: lanes
+n10703: lanes
+n10704: lanes
+n10705: lanes
+n10706: lanes
+n10716: lanes
+n10717: lanes
+n10737: lanes
+n1423: sign:B-20 junction
+n3685: sign:B-20 junction
+# --- 03
+n8373: sign:B-20 junction right
+n8374: sign:B-20 junction
+n8586: sign:B-20 junction carX
+n13648: sign:B-20 junction carR
+n1421: sign:B-20 tee
+n9496: left onc
+n6115: sign:A-7 left onc       # A-7 з табличкою форми головної дороги
+n1003: sign:A-17
+n8073: sign:A-17
+n6226: gen
+n6442: gen
+n6361: gen
+n6362: gen
+n10065: gen
+n8246: gen
+# --- 04
+n8587: rondo sign:C-12
+n9649: rondo sign:C-12
+n4256: sign:A-8
+n13207: sign:D-1
+n3083: sign:D-1 straight
+n9555: sign:D-1 junction carR
+n9556: sign:D-1 junction carR
+n8588: sign:D-1 junction straight
+n3908: sign:D-1
+n6032: sign:D-2
+n3085: sign:D-2 sign:A-7
+n3414: sign:D-2 sign:A-7
+# --- 05
+n8084: sign:A-7
+n8086: sign:A-7 plate:80 m     # «проїхавши 80 м» — потрібна табличка T-1
+n7444: sign:A-7 junction
+n3073: sign:A-7
+n6063: sign:A-7
+n6333: sign:D-40
+n7237: sign:D-40
+n13035: sign:D-40
+n6240: sign:D-40
+n6247: sign:D-40
+n13548: sign:D-40
+n13213: sign:D-40
+# --- 06
+n13427: sign:D-40
+n8522: sign:D-41
+n1590: xwalk sign:D-6
+n6166: gen
+n6173: gen
+n8555: sign:D-47               # виїзд з внутрішньої дороги
+n14060: carR
+n13523: cane
+n13402: cane
+n13522: wheel
+n7434: right ped xwalk
+n9554: right ped
+n13528: wheel
+n9541: cyc
+# --- 07
+n3421: cyc
+n13655: cyc
+n8979: cyc
+n13753: cyc
+n13654: scooter
+n13662: scooter
+n13478: sign:D-6a
+n13485: sign:D-6b
+n8517: sign:D-6b
+n8282: right cyc
+n8296: right cyc
+n9706: cyc xwalk
+# --- 08
+n13639: cyc straight sign:D-1
+n13490: xwalk cyc
+n13491: xwalk cyc
+n13754: xwalk lanes
+n1651: xwalk cyc
+n4201: schoolbus
+n6242: schoolbus
+n8163: schoolbus country
+n6272: ped cyc                 # перевірити текст
+n3420: cyc sign:A-7            # перевірити текст
+n1647: tram
+n7230: ped                     # перевірити текст
+# --- 09
+n8292: ahead xwalk             # перевірити текст
+n13764: pedroad
+n8284: cyc
+n8294: cyc
+n2845: sign:D-43
+n3040: sign:E-17a              # зелена табличка з назвою — не кінець населеного пункту
+n3618: sign:D-43
+n6324: sign:D-43
+n891: sign:A-1
+n892: sign:A-2
+n893: sign:A-3 plate:3         # перевірити номер знака
+n894: sign:A-4
+# --- 10
+n3176: sign:A-4 plate:3
+n3439: sign:A-3|A-4 plate:Koniec
+n1035: sign:A-4 plate:Droga kręta
+n3655: sign:A-4 plate:Droga kręta
+n4343: sign:A-5
+n6097: sign:A-6a
+n13277: sign:A-6b              # перевірити варіант
+n8085: sign:A-6c               # перевірити варіант
+n13504: sign:A-5               # на фото «X» — перевірити текст
+n978: sign:A-6d                # перевірити варіант
+n988: sign:A-11
+n991: sign:A-11
+# --- 11
+n992: sign:A-11a plate:25 m
+n990: sign:A-11 plate:1,2 km
+n996: sign:A-12a
+n1000: sign:A-14
+n7450: sign:A-14 works         # робітник на дорозі
+n9640: sign:A-14 works
+n6355: sign:A-18b plate:3 km
+n13447: sign:A-18a             # худоба (корова)
+n4257: sign:A-23 plate:10%     # перевірити номер знака (підйом)
+n1015: sign:A-22               # спуск
+n7777: moto hill onc?
+n13497: moto hill
