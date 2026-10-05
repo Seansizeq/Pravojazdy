@@ -132,6 +132,10 @@ html, body {
   overscroll-behavior: contain;
   touch-action: pan-y;
 }
+/* на телефонах розмиття фону дуже дороге: місто під меню рухається, і браузер розмиває його щокадру */
+@media (pointer: coarse) {
+  .screen { backdrop-filter: none; background: rgba(30, 22, 18, 0.66); }
+}
 .screen > .card { margin: auto; }
 .card {
   background: var(--card);
@@ -200,6 +204,14 @@ h2 { margin: 8px 0 16px; font-size: 19px; font-weight: 800; line-height: 1.35; }
 .option.correct .letter { background: var(--good); color: #fff; }
 .option.wrong { border-color: var(--bad); background: #fdecec; }
 .option.wrong .letter { background: var(--bad); color: #fff; }
+/* пробний іспит: позначена відповідь, ще не підтверджена */
+.option.selected { border-color: #3b82f6; background: #eaf2ff; }
+.option.selected .letter { background: #3b82f6; color: #fff; }
+#quiz-next { margin-top: 14px; }
+.quiz-close {
+  border: none; background: #ece3d6; color: var(--ink); cursor: pointer;
+  width: 30px; height: 30px; border-radius: 10px; font-family: inherit; font-size: 15px; font-weight: 900;
+}
 .option:disabled { cursor: default; }
 
 .feedback { margin-top: 14px; }
@@ -360,3 +372,43 @@ h2 { margin: 8px 0 16px; font-size: 19px; font-weight: 800; line-height: 1.35; }
   .btn-auto { font-size: 13px; padding: 8px 10px; min-height: 40px; }
   .opt { font-size: 13px; padding: 9px 10px; }
 }
+
+/* ---------- Навчання без їзди ---------- */
+.study { text-align: left; margin-bottom: 4px; }
+.study .free-head { margin-top: 0; }
+.levels-head { text-align: left; margin: 14px 0 8px; }
+.study-bar { display: flex; height: 8px; margin: 8px 4px 10px; border-radius: 99px; background: #ece3d6; overflow: hidden; }
+.study-bar i { display: block; height: 100%; width: 0; transition: width 0.3s; }
+.study-bar .m { background: var(--good); }
+.study-bar .l { background: var(--accent); }
+.study-bar .e { background: var(--bad); }
+.study-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.study-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0;
+  border: 2px solid #e6dccd; background: #fff; border-radius: 16px;
+  padding: 12px; cursor: pointer; font-family: inherit; color: var(--ink); text-align: left;
+}
+.study-btn b { font-weight: 900; font-size: 15px; line-height: 1.2; }
+.study-btn small { font-weight: 600; font-size: 12px; color: var(--muted); line-height: 1.3; }
+.study-icon { font-size: 26px; line-height: 1; }
+.study-exam { border-color: #f3d27a; background: #fff6dc; }
+.study-btn:hover:not(:disabled) { border-color: var(--accent); }
+.study-btn:disabled { cursor: default; opacity: 0.6; }
+@media (max-width: 480px) {
+  .study-grid { gap: 6px; }
+  .study-btn { padding: 10px 8px; border-radius: 14px; }
+  .study-btn b { font-size: 13px; }
+  .study-icon { font-size: 22px; }
+}
+
+.topics { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.topic {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  border: 2px solid #e6dccd; background: #fff; border-radius: 12px;
+  padding: 9px 12px; cursor: pointer; font-family: inherit; color: var(--ink); text-align: left;
+}
+.topic:hover { border-color: var(--accent); }
+.topic.done { border-color: #bfe8cf; background: #f3fbf6; }
+.topic-name { flex: 1; min-width: 0; font-weight: 800; font-size: 15px; line-height: 1.3; }
+.topic-meta { flex: none; font-weight: 800; font-size: 12px; color: var(--muted); }
+.topic-meta .bad { color: var(--bad); }

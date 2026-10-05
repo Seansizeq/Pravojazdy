@@ -8,20 +8,26 @@ export class Minimap {
   private scale = 1;
   private ox = 0;
   private oy = 0;
+  /** розмір карти в CSS-пікселях; сам canvas — у dpr разів більший, щоб на телефоні карта була чіткою */
+  private size: number;
+  private dpr = Math.min(window.devicePixelRatio || 1, 3);
 
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!;
+    this.size = canvas.width;
+    canvas.width = canvas.height = this.base.width = this.base.height = Math.round(this.size * this.dpr);
   }
 
   setGrid(grid: RoadGrid) {
     const { cols, rows } = grid.level;
-    const size = this.canvas.width;
+    const { size } = this;
     this.scale = (size - 8) / Math.max(cols, rows);
     this.ox = (size - cols * this.scale) / 2;
     this.oy = (size - rows * this.scale) / 2;
-    this.base.width = this.base.height = size;
     const b = this.base.getContext('2d')!;
-    b.clearRect(0, 0, size, size);
+    b.setTransform(1, 0, 0, 1, 0, 0);
+    b.clearRect(0, 0, this.base.width, this.base.height);
+    b.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     b.fillStyle = 'rgba(255, 250, 242, 0.92)';
     b.beginPath();
     b.roundRect(0, 0, size, size, 14);
@@ -58,9 +64,10 @@ export class Minimap {
     t: number,
   ) {
     const { ctx } = this;
-    const size = this.canvas.width;
-    ctx.clearRect(0, 0, size, size);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.drawImage(this.base, 0, 0);
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     if (route.length > 1) {
       ctx.strokeStyle = '#22c55e';
@@ -74,12 +81,15 @@ export class Minimap {
       ctx.stroke();
     }
 
+    // усі машини трафіку — одним шляхом і однією заливкою
     ctx.fillStyle = '#f2f2f2';
+    ctx.beginPath();
     for (const o of others) {
-      ctx.beginPath();
-      ctx.arc(this.px(o.x), this.py(o.z), 1.8, 0, Math.PI * 2);
-      ctx.fill();
+      const x = this.px(o.x), y = this.py(o.z);
+      ctx.moveTo(x + 1.8, y);
+      ctx.arc(x, y, 1.8, 0, Math.PI * 2);
     }
+    ctx.fill();
 
     if (target) {
       const pulse = 3 + Math.sin(t * 6) * 1.2;

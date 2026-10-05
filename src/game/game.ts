@@ -15,10 +15,31 @@ import { Car } from './car';
 import { Input } from './input';
 import { Minimap } from './minimap';
 import { Navigator, type Maneuver } from './nav';
+import { AdaptiveQuality, type Tier } from './quality';
+import { progress } from './progress';
+import { ALL_IDS, EXAM_MAX, EXAM_PASS, examSet, reviewSet, topicSet, topics, type StudyKind } from './study';
 import { Traffic } from './traffic';
 import { UI, type Best, type Mistake, type NavView } from './ui';
 
-type State = 'menu' | 'driving' | 'quiz' | 'paused' | 'finished';
+/** study — навчання без їзди (питання поверх міста, що повільно обертається, як у меню) */
+type State = 'menu' | 'driving' | 'quiz' | 'paused' | 'finished' | 'study';
+
+interface StudySession {
+  kind: StudyKind;
+  tag?: string;
+  ids: string[];
+  i: number;
+  correct: number;
+  got: number;
+  max: number;
+  mistakes: Mistake[];
+}
+
+/** Де сонце відносно авто. Осі карти тіней — як у камери тіні, що дивиться із сонця на авто (Matrix4.lookAt). */
+const SUN_OFFSET = new THREE.Vector3(-18, 80, 12);
+const SUN_Z = SUN_OFFSET.clone().normalize();
+const SUN_X = new THREE.Vector3(0, 1, 0).cross(SUN_Z).normalize();
+const SUN_Y = SUN_Z.clone().cross(SUN_X);
 
 const DEFAULT_LIMIT = 50;
 /** перше питання — не раніше, ніж проїдеш стільки метрів */
@@ -117,6 +138,11 @@ export class Game {
   private hemi = new THREE.HemisphereLight(0xfff6e8, 0x8a6f5a, 1.4);
   private headlights = new THREE.SpotLight(0xfff2cc, 0, 70, 0.55, 0.6, 1.2);
   private clock = new THREE.Clock();
+  private quality: AdaptiveQuality;
+  /** перемалювати сцену, навіть якщо вона зараз нерухома (змінився розмір canvas) */
+  private redraw = true;
+  /** куди світить сонце: центр карти тіней, прив'язаний до її текселів */
+  private sunAt = new THREE.Vector3();
 
   private input = new Input();
   private ui = new UI();
@@ -164,8 +190,7 @@ export class Game {
   private distance = 0;
   private lastQuizAt = -Infinity;
   private askedSession = new Set<string>();
-  /** питання, які вже траплялися (між поїздками) — щоб наступна поїздка була з іншими */
-  private seen = new Set<string>();
+  private study: StudySession | null = null;
   private examGot = 0;
   private examMax = 0;
   private questionsOn = true;
@@ -179,10 +204,11 @@ export class Game {
   private goalsReached = 0;
 
   constructor(canvas: HTMLCanvasElement) {
-    // на телефонах — менша роздільність і тіні, щоб гра не гальмувала
+    // на телефонах — менша карта тіней; роздільність підлаштовується під FPS (див. AdaptiveQuality)
     const phone = window.matchMedia('(pointer: coarse)').matches;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, phone ? 1.5 : 2));
+    this.quality = new AdaptiveQuality(window.devicePixelRatio || 1, phone);
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    this.applyQuality(this.quality.tier);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -274,6 +300,8 @@ export class Game {
     this.sun.color.setHex(look.sunColor);
     const night = w === 'night';
     this.headlights.intensity = night ? 60 : 0;
+    // вимкнена фара — поза сценою: інакше кожен піксель усе одно рахує її світло
+    this.headlights.visible = night;
     // ліхтарі й фари світяться вночі
     (mat(0xfff1b8) as THREE.MeshLambertMaterial).emissive.setHex(night ? 0xffe39a : 0);
     (mat(0xfff6c8) as THREE.MeshLambertMaterial).emissive.setHex(night ? 0xfff1c0 : 0);
@@ -281,14 +309,105 @@ export class Game {
 
   private showMenu() {
     this.state = 'menu';
+    this.study = null;
     this.ui.hideScreens();
     this.ui.show('hud', false);
     this.ui.menu(LEVELS, FREE_MAPS, loadBest(), (l) => this.start(l));
+    this.ui.studyMenu(progress.summary(ALL_IDS), ALL_IDS.length, topics().length);
+  }
+
+  // ---------------------------------------------------------------- навчання без їзди
+
+  private showTopics() {
+    this.ui.hideScreens();
+    const list = topics().map(({ tag, ids }) => ({
+      tag,
+      total: ids.length,
+      mastered: ids.filter((id) => progress.status(id) === 'mastered').length,
+      mistakes: ids.filter((id) => progress.status(id) === 'mistake').length,
+    }));
+    this.ui.topics(list, (tag) => this.startStudy('topic', tag));
+  }
+
+  private startStudy(kind: StudyKind, tag?: string) {
+    const ids = kind === 'exam' ? examSet() : kind === 'review' ? reviewSet() : topicSet(tag!);
+    if (!ids.length) return this.showMenu();
+    this.study = { kind, tag, ids, i: 0, correct: 0, got: 0, max: 0, mistakes: [] };
+    this.state = 'study';
+    this.ui.hideScreens();
+    this.ui.show('hud', false);
+    this.nextStudy();
+  }
+
+  private nextStudy() {
+    const s = this.study!;
+    if (s.i >= s.ids.length) return this.finishStudy();
+    const q = QUESTIONS[s.ids[s.i]];
+    const exam = s.kind === 'exam';
+    const n = `${s.i + 1}`;
+    const head = exam
+      ? (pl: boolean) => pl
+        ? `${n}/${s.ids.length} · ${q.ua.options.length === 2 ? 'podstawowe' : 'specjalistyczne'}`
+        : `${n}/${s.ids.length} · ${q.ua.options.length === 2 ? 'базові знання' : 'спеціалізовані'}`
+      : () => `${n}/${s.ids.length} · ${q.tag}`;
+    // пробний іспит — завжди з іспитовим часом
+    const time = exam || this.timerOn ? (q.ua.options.length === 2 ? EXAM_TIME.yesNo : EXAM_TIME.abc) : null;
+    this.ui.quiz(
+      q,
+      0,
+      time,
+      (ok, picked) => {
+        progress.record(q.id, ok);
+        s.max += q.points;
+        if (ok) {
+          s.correct++;
+          s.got += q.points;
+        } else {
+          s.mistakes.push({ q, picked });
+        }
+      },
+      () => {
+        s.i++;
+        this.nextStudy();
+      },
+      { head, exam, onQuit: () => this.finishStudy() },
+    );
+  }
+
+  private finishStudy() {
+    const s = this.study!;
+    const total = s.correct + s.mistakes.length;
+    const done = s.i >= s.ids.length;
+    this.ui.hideScreens();
+    const base = { correct: s.correct, total, mistakes: s.mistakes, violations: [], hasNext: false };
+    if (s.kind === 'exam') {
+      const passed = s.got >= EXAM_PASS;
+      const [icon, title] = !done ? ['⏹', 'Іспит перервано'] : passed ? ['🎉', 'Іспит складено!'] : ['📋', 'Іспит не складено'];
+      this.ui.finish({
+        ...base, icon, title, again: 'Ще один пробний іспит',
+        headline: done ? `${s.got} / ${EXAM_MAX} балів` : undefined,
+        verdict: done
+          ? `${passed ? '✅' : '❌'} Щоб скласти, потрібно щонайменше ${EXAM_PASS} балів з ${EXAM_MAX}`
+          : `Пройдено ${total} з ${s.ids.length} питань — результат не зараховано`,
+        hint: s.mistakes.length ? 'Ці питання вже чекають у «Помилки й повторення».' : '',
+      });
+    } else {
+      this.ui.finish({
+        ...base,
+        icon: s.kind === 'review' ? '📝' : '📖',
+        title: s.kind === 'review' ? 'Повторення завершено' : s.tag!,
+        again: s.kind === 'review' ? 'Повторити ще' : 'Ця тема ще раз',
+        verdict: s.mistakes.length ? 'Помилки повернуться в наступному повторенні та в поїздках' : 'Без жодної помилки 🎉',
+        hint: '',
+      });
+    }
   }
 
   private start(level: Level) {
     this.load(level);
     this.reset();
+    // перші кадри рівня — компіляція шейдерів, за ними FPS не судимо
+    this.quality.hold();
     this.ui.hideScreens();
     this.ui.show('hud');
     this.state = 'driving';
@@ -383,7 +502,11 @@ export class Game {
 
   private bindButtons() {
     const on = (id: string, fn: () => void) => (document.getElementById(id)!.onclick = fn);
-    on('btn-restart', () => this.start(this.level));
+    on('btn-restart', () => (this.study ? this.startStudy(this.study.kind, this.study.tag) : this.start(this.level)));
+    on('study-exam', () => this.startStudy('exam'));
+    on('study-review', () => this.startStudy('review'));
+    on('study-topics', () => this.showTopics());
+    on('btn-topics-back', () => this.showMenu());
     on('btn-restart-pause', () => this.start(this.level));
     on('btn-menu', () => this.showMenu());
     on('btn-menu-pause', () => this.showMenu());
@@ -472,6 +595,7 @@ export class Game {
   private resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.redraw = true;
     this.camera.aspect = w / h;
     // на вузьких (портретних) екранах — ширший кут, щоб бачити дорогу попереду,
     // і кадр зміщений, щоб авто було вище за кнопки й спідометр
@@ -697,17 +821,14 @@ export class Game {
     return { ...rules, gap: Math.max(MIN_QUESTION_GAP, rules.gap) };
   }
 
-  /** Випадкове питання з тих, що підходять до сцени: спершу ті, що ще не траплялися й не взяті іншими точками. */
+  /**
+   * Питання з тих, що підходять до сцени й не взяті іншими точками: спершу помилки, далі ті, яким настав
+   * строк повторення, нові, і лише потім — ті, що бачив найдавніше (прогрес зберігається між сесіями).
+   */
   private pickOption(options: Option[], taken: Set<string>): Option | null {
     if (!options.length) return null;
     const free = options.filter((o) => !taken.has(o.id));
-    const fresh = free.filter((o) => !this.seen.has(o.id));
-    if (!fresh.length && free.length) {
-      // усі питання точки вже були — починаємо коло спочатку
-      for (const o of options) this.seen.delete(o.id);
-    }
-    const from = fresh.length ? fresh : free.length ? free : options;
-    return from[Math.floor(Math.random() * from.length)];
+    return progress.order(free.length ? free : options, (o) => o.id)[0];
   }
 
   /** Підлаштувати сцену під обране питання: різновиди учасників і варіанти знаків. */
@@ -726,7 +847,6 @@ export class Game {
     this.state = 'quiz';
     this.asked++;
     this.askedSession.add(id);
-    this.seen.add(id);
     this.examMax += q.points;
     const reward = REWARD_PER_POINT * q.points;
     const time = this.timerOn ? (q.ua.options.length === 2 ? EXAM_TIME.yesNo : EXAM_TIME.abc) : null;
@@ -735,6 +855,7 @@ export class Game {
       reward,
       time,
       (ok, picked) => {
+        progress.record(id, ok);
         if (ok) {
           this.score += reward;
           this.correct++;
@@ -1029,7 +1150,8 @@ export class Game {
   }
 
   private frame() {
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    const raw = this.clock.getDelta();
+    const dt = Math.min(raw, 0.05);
     this.time += dt;
 
     if (this.state === 'driving') {
@@ -1095,6 +1217,15 @@ export class Game {
     }
     if (this.person.visible) this.person.position.y = 0.35 + Math.abs(Math.sin(this.time * 5)) * 0.15;
 
+    // під екраном питання, паузи чи фінішу місто стоїть — не перемальовуємо його щокадру (телефон не гріється, вікно питання не гальмує)
+    const still = this.state === 'quiz' || this.state === 'paused' || this.state === 'finished' || this.state === 'study';
+    if (still && !this.redraw) return;
+    this.redraw = false;
+    if (!still) {
+      const tier = this.quality.update(raw);
+      if (tier) this.applyQuality(tier);
+    }
+
     this.updateCamera(dt);
     this.minimap.draw(
       { x: this.car.pos.x, z: this.car.pos.z, heading: this.car.heading },
@@ -1123,7 +1254,21 @@ export class Game {
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(target);
 
-    this.sun.position.set(this.car.pos.x - 18, 80, this.car.pos.z + 12);
-    this.sun.target.position.copy(this.car.pos);
+    // центр карти тіней зсуваємо лише на цілі тексели — краї тіней не «мерехтять» і не повзуть під час руху
+    const sc = this.sun.shadow.camera;
+    const texel = (sc.right - sc.left) / this.sun.shadow.mapSize.x;
+    const p = this.car.pos;
+    const a = p.dot(SUN_X), b = p.dot(SUN_Y);
+    this.sunAt.copy(p).addScaledVector(SUN_X, Math.round(a / texel) * texel - a).addScaledVector(SUN_Y, Math.round(b / texel) * texel - b);
+    this.sun.position.copy(this.sunAt).add(SUN_OFFSET);
+    this.sun.target.position.copy(this.sunAt);
+  }
+
+  /** Роздільність і тіні під силу пристрою. */
+  private applyQuality(t: Tier) {
+    this.renderer.setPixelRatio(t.ratio);
+    // без тіней сонце не кидає їх зовсім: зникає і прохід карти тіней, і її вибірка в шейдерах
+    this.sun.castShadow = t.shadows;
+    this.redraw = true;
   }
 }

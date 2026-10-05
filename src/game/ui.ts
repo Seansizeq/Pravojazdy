@@ -1,4 +1,5 @@
 import type { Level, Question } from '../types';
+import type { Summary } from './progress';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -47,6 +48,19 @@ export interface Best {
   pct: number;
 }
 
+/** Як показати питання поза звичайною поїздкою. */
+export interface QuizMode {
+  /** текст замість теми питання (на іспиті тема — підказка, тож її не видно) */
+  head?: (pl: boolean) => string;
+  /**
+   * Як на іспиті (§ 19 ust. 8 rozporządzenia MI z 24.11.2023): відповідь можна змінити, доки не перейдеш
+   * до наступного питання або не мине час; без відповіді — 0 балів. Правильну відповідь не показуємо.
+   */
+  exam?: boolean;
+  /** кнопка ✕ — завершити заняття достроково */
+  onQuit?: () => void;
+}
+
 let audio: AudioContext | null = null;
 export function beep(ok: boolean) {
   try {
@@ -78,30 +92,41 @@ export class UI {
   }
 
   hideScreens() {
-    for (const id of ['screen-menu', 'screen-finish', 'screen-pause', 'screen-quiz']) this.show(id, false);
+    for (const id of ['screen-menu', 'screen-finish', 'screen-pause', 'screen-quiz', 'screen-topics']) this.show(id, false);
   }
 
   setScore(score: number) {
     $('hud-score').textContent = `⭐ ${score}`;
   }
 
+  /** Що вже записано в HUD: щокадрові оновлення чіпають DOM лише тоді, коли значення змінилося (інакше — перерахунок сторінки щокадру). */
+  private hud = new Map<string, string>();
+  private hudSet(key: string, v: string, apply: () => void) {
+    if (this.hud.get(key) === v) return;
+    this.hud.set(key, v);
+    apply();
+  }
+  private hudText(id: string, v: string) {
+    this.hudSet(id, v, () => ($(id).textContent = v));
+  }
+
   setSpeed(kmh: number, limit: number) {
-    $('speed').textContent = String(Math.round(kmh));
-    $('speed-limit').textContent = String(limit);
+    this.hudText('speed', String(Math.round(kmh)));
+    this.hudText('speed-limit', String(limit));
     $('speed').parentElement!.classList.toggle('over', kmh > limit + 2);
   }
 
   setProgress(r: number | null) {
     this.show('progress', r !== null);
-    if (r !== null) $('progress-bar').style.width = `${Math.round(r * 100)}%`;
+    if (r !== null) this.hudSet('progress', `${Math.round(r * 100)}%`, () => ($('progress-bar').style.width = `${Math.round(r * 100)}%`));
   }
 
   setNav(v: NavView) {
-    $('nav-arrow').textContent = v.icon;
-    $('nav-dist').textContent = v.dist;
-    $('nav-label').textContent = v.label;
+    this.hudText('nav-arrow', v.icon);
+    this.hudText('nav-dist', v.dist);
+    this.hudText('nav-label', v.label);
     const nav = $('nav');
-    nav.style.background = v.color ?? '';
+    this.hudSet('nav-bg', v.color ?? '', () => (nav.style.background = v.color ?? ''));
     nav.classList.toggle('clickable', !!v.clickable);
   }
 
@@ -155,6 +180,42 @@ export class UI {
     this.show('screen-menu');
   }
 
+  /** Блок «Навчання без їзди»: смуга прогресу по всіх питаннях і кількість на повторення. */
+  studyMenu(s: Summary, total: number, topics: number) {
+    $('study-stats').textContent =
+      `Засвоєно ${s.mastered} · вивчаю ${s.learning} · помилки ${s.mistake} · нові ${s.new} (з ${total})`;
+    const w = (n: number) => `${(n / total) * 100}%`;
+    $('study-bar-m').style.width = w(s.mastered);
+    $('study-bar-l').style.width = w(s.learning);
+    $('study-bar-e').style.width = w(s.mistake);
+    $('study-review-n').textContent = s.due ? `${s.due} на сьогодні` : 'поки нічого — молодець';
+    $<HTMLButtonElement>('study-review').disabled = !s.due;
+    $('study-topics-n').textContent = `${topics} ${plural(topics, 'тема', 'теми', 'тем')}`;
+  }
+
+  /** Список тем: спершу ті, де є помилки. */
+  topics(list: { tag: string; total: number; mastered: number; mistakes: number }[], onPick: (tag: string) => void) {
+    const box = $('topics');
+    box.innerHTML = '';
+    for (const t of [...list].sort((a, b) => Number(!a.mistakes) - Number(!b.mistakes))) {
+      const b = document.createElement('button');
+      b.className = `topic ${t.mastered === t.total ? 'done' : ''}`;
+      b.innerHTML = '<span class="topic-name"></span><span class="topic-meta"></span>';
+      b.querySelector('.topic-name')!.textContent = t.tag;
+      const meta = b.querySelector('.topic-meta')!;
+      if (t.mistakes) {
+        const bad = document.createElement('span');
+        bad.className = 'bad';
+        bad.textContent = `✗ ${t.mistakes} · `;
+        meta.append(bad);
+      }
+      meta.append(`✓ ${t.mastered}/${t.total}`);
+      b.onclick = () => onPick(t.tag);
+      box.appendChild(b);
+    }
+    this.show('screen-topics');
+  }
+
   setPause(stats: string, questionsOn: boolean, showToggle: boolean) {
     $('pause-stats').innerHTML = stats;
     const t = $('btn-questions');
@@ -183,6 +244,7 @@ export class UI {
    * Показує офіційне питання. Варіанти — у тому ж порядку, що й на іспиті (A, B, C або Tak/Nie).
    * time — обмеження часу (читання + відповідь, с) або null. Без відповіді за відведений час — 0 балів.
    * onAnswer викликається один раз (picked = -1, якщо час вийшов), onContinue — після «Їхати далі».
+   * reward = 0 — без зірок (навчання без їзди).
    */
   quiz(
     q: Question,
@@ -190,8 +252,8 @@ export class UI {
     time: { read: number; answer: number } | null,
     onAnswer: (correct: boolean, picked: number) => void,
     onContinue: () => void,
+    mode: QuizMode = {},
   ) {
-    $('quiz-tag').textContent = q.tag;
     $('quiz-meta').textContent = `№ ${q.num} · ${q.points} ${plural(q.points, 'бал', 'бали', 'балів')}`;
 
     const img = $<HTMLImageElement>('quiz-img');
@@ -204,15 +266,35 @@ export class UI {
     const fb = $('quiz-feedback');
     fb.classList.add('hidden');
     const yesNo = q.ua.options.length === 2;
+    const exam = !!mode.exam;
     let picked: number | null = null;
+    /** іспит: позначена, але ще не підтверджена відповідь */
+    let selected: number | null = null;
     let ok = false;
+
+    const close = $('quiz-close');
+    close.classList.toggle('hidden', !mode.onQuit);
+    close.onclick = () => {
+      clearInterval(this.quizTimer);
+      this.show('screen-quiz', false);
+      mode.onQuit?.();
+    };
+    const next = $('quiz-next');
+    next.classList.toggle('hidden', !exam);
+    next.onclick = () => finish(selected ?? -1);
 
     const finish = (i: number) => {
       if (picked !== null) return;
       picked = i;
       clearInterval(this.quizTimer);
-      $('quiz-timer').classList.add('hidden');
       ok = i === q.correct;
+      if (exam) {
+        // як на іспиті: без підказки, одразу наступне питання
+        onAnswer(ok, i);
+        onContinue();
+        return;
+      }
+      $('quiz-timer').classList.add('hidden');
       buttons.forEach((x, j) => {
         x.disabled = true;
         if (j === q.correct) x.classList.add('correct');
@@ -232,7 +314,11 @@ export class UI {
       b.className = 'option';
       // так/ні — як кнопки TAK/NIE на іспиті, без літер; інакше — A, B, C
       b.innerHTML = yesNo ? '<span></span>' : `<span class="letter">${'ABC'[i]}</span><span></span>`;
-      b.onclick = () => finish(i);
+      b.onclick = () => {
+        if (!exam) return finish(i);
+        selected = i;
+        buttons.forEach((x, j) => x.classList.toggle('selected', j === i));
+      };
       box.appendChild(b);
       return b;
     });
@@ -240,15 +326,18 @@ export class UI {
     const render = () => {
       const pl = this.lang === 'pl';
       const t = pl ? q.pl : q.ua;
+      $('quiz-tag').textContent = mode.head ? mode.head(pl) : q.tag;
       $('quiz-text').textContent = t.text;
       buttons.forEach((b, i) => ((b.lastElementChild as HTMLElement).textContent = t.options[i]));
       $('quiz-lang').textContent = pl ? 'UA' : 'PL';
-      $('btn-continue').textContent = pl ? 'Jedź dalej →' : 'Їхати далі →';
+      $('btn-continue').textContent = mode.onQuit ? (pl ? 'Dalej →' : 'Далі →') : pl ? 'Jedź dalej →' : 'Їхати далі →';
+      next.textContent = pl ? 'Następne pytanie →' : 'Наступне питання →';
       if (picked === null) return;
       const title = $('fb-title');
       title.className = `fb-title ${ok ? 'good' : 'bad'}`;
+      const plus = reward ? ` +${reward}` : '';
       if (picked < 0) title.textContent = pl ? '⏱ Koniec czasu — 0 pkt' : '⏱ Час вийшов — 0 балів';
-      else if (ok) title.textContent = pl ? `✅ Dobrze! +${reward}` : `✅ Правильно! +${reward}`;
+      else if (ok) title.textContent = pl ? `✅ Dobrze!${plus}` : `✅ Правильно!${plus}`;
       else title.textContent = pl ? '❌ Źle' : '❌ Неправильно';
       $('fb-text').textContent = `${pl ? 'Poprawna odpowiedź' : 'Правильна відповідь'}: ${t.options[q.correct]}`;
     };
@@ -275,7 +364,8 @@ export class UI {
       $('quiz-timer-text').textContent = `${reading ? (pl ? 'Czytanie pytania' : 'Читання питання') : (pl ? 'Czas na odpowiedź' : 'Час на відповідь')}: ${Math.ceil(left)} ${pl ? 's' : 'с'}`;
       timerEl.classList.toggle('reading', reading);
       timerEl.classList.toggle('urgent', !reading && left <= 5);
-      if (!reading && left <= 0) finish(-1);
+      // на іспиті позначена відповідь зараховується й без підтвердження
+      if (!reading && left <= 0) finish(selected ?? -1);
     };
     if (time) this.quizTimer = window.setInterval(tick, 100);
     render();
@@ -292,7 +382,10 @@ export class UI {
   finish(o: {
     icon: string;
     title: string;
-    score: number;
+    /** зірки за поїздку; у навчанні без їзди — не показуємо */
+    score?: number;
+    /** великий підсумок замість зірок (бали пробного іспиту) */
+    headline?: string;
     correct: number;
     total: number;
     extra?: string;
@@ -301,18 +394,25 @@ export class UI {
     hasNext: boolean;
     /** бали за іспитовою шкалою (1–3 за питання) */
     exam?: { got: number; max: number };
+    /** готовий висновок замість типового */
+    verdict?: string;
+    /** підказка під списком помилок */
+    hint?: string;
+    /** напис на кнопці «ще раз» */
+    again?: string;
   }) {
     $('finish-icon').textContent = o.icon;
     $('finish-title').textContent = o.title;
     const pct = o.total ? Math.round((o.correct / o.total) * 100) : 100;
     let verdict = pct >= 90 ? 'Готовий до іспиту! 🎉' : pct >= 70 ? 'Непогано, але є що підтягнути' : 'Варто проїхати ще раз';
     if (o.exam && o.exam.max) {
-      // на іспиті WORD: 32 питання, максимум 74 бали, щоб скласти — щонайменше 68 (≈ 92 %)
-      const ep = o.exam.got / o.exam.max;
-      verdict = `Іспитові бали: ${o.exam.got} з ${o.exam.max} (${Math.round(ep * 100)}%). `
-        + (ep >= 68 / 74 ? 'Такий результат на WORD — «zdany» 🎉' : 'На WORD потрібно ≥ 68 з 74 (≈ 92%) — ще потренуйся');
+      // за кілька питань поїздки не можна сказати, чи склав би іспит, — для цього є пробний іспит на 32 питання
+      verdict = `Іспитові бали: ${o.exam.got} з ${o.exam.max} (${Math.round((o.exam.got / o.exam.max) * 100)}%). `
+        + 'Повний пробний іспит (32 питання, як у WORD) — у меню «Навчання без їзди»';
     }
-    $('result').innerHTML = `<b>${o.score} ⭐</b>Правильних відповідей: ${o.correct} з ${o.total} (${pct}%)<br>${o.extra ? `${o.extra}<br>` : ''}${verdict}`;
+    if (o.verdict) verdict = o.verdict;
+    const top = o.headline ?? (o.score === undefined ? '' : `${o.score} ⭐`);
+    $('result').innerHTML = `${top ? `<b>${top}</b>` : ''}Правильних відповідей: ${o.correct} з ${o.total} (${pct}%)<br>${o.extra ? `${o.extra}<br>` : ''}${verdict}`;
 
     const list = $('mistakes');
     list.innerHTML = '';
@@ -331,10 +431,11 @@ export class UI {
     for (const v of o.violations) add('Порушення під час руху', v);
     const hint = document.createElement('p');
     hint.className = 'sub';
-    hint.textContent = !o.mistakes.length && !o.violations.length
-      ? 'Жодної помилки й порушення! Наступна поїздка буде з іншими питаннями.'
-      : 'Наступна поїздка буде з іншими питаннями.';
+    hint.textContent = o.hint ?? (o.mistakes.length
+      ? 'Питання з помилками повернуться в наступних поїздках і в «Помилки й повторення».'
+      : o.violations.length ? 'Наступна поїздка буде з іншими питаннями.' : 'Жодної помилки й порушення! Наступна поїздка буде з іншими питаннями.');
     list.appendChild(hint);
+    $('btn-restart').textContent = o.again ?? 'Проїхати ще раз';
     this.show('btn-next', o.hasNext);
     this.show('screen-finish');
   }

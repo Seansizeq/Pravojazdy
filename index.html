@@ -58,6 +58,16 @@
       <div class="logo">🚗<span class="flag"></span></div>
       <h1>ПДР Польщі</h1>
       <p class="sub">Їзди містом і трасою та відповідай на офіційні питання польського іспиту (база Ministerstwa Infrastruktury, українською й польською).</p>
+      <div class="study">
+        <div class="free-head"><b>📚 Навчання без їзди</b><span id="study-stats"></span></div>
+        <div class="study-bar" aria-hidden="true"><i class="m" id="study-bar-m"></i><i class="l" id="study-bar-l"></i><i class="e" id="study-bar-e"></i></div>
+        <div class="study-grid">
+          <button class="study-btn study-exam" id="study-exam"><span class="study-icon">🎓</span><b>Пробний іспит</b><small>32 питання, як у WORD</small></button>
+          <button class="study-btn" id="study-review"><span class="study-icon">📝</span><b>Помилки й повторення</b><small id="study-review-n"></small></button>
+          <button class="study-btn" id="study-topics"><span class="study-icon">📖</span><b>За темою</b><small id="study-topics-n"></small></button>
+        </div>
+      </div>
+      <div class="free-head levels-head"><b>🛣️ Поїздки</b><span>Їзда з питаннями там, де ситуація на дорозі збігається з фото</span></div>
       <div class="levels" id="levels"></div>
       <div class="options-row">
         <button class="opt" id="opt-timer">⏱ Час на відповідь</button>
@@ -73,8 +83,19 @@
           <li>Гальмо, коли стоїш = задній хід. <b>P</b> або <b>Esc</b> = пауза</li>
           <li><b>🤖 Автопілот</b>: авто їде саме, ти лише відповідаєш; будь-яка кнопка керування його вимикає</li>
           <li><b>⏱ Час</b>: як на іспиті — «так/ні» 20 с на читання + 15 с на відповідь, A/B/C — 50 с</li>
+          <li><b>📚 Навчання</b>: питання, на які відповів неправильно, повертаються в поїздках і в «Помилки й повторення»; правильні — через 1, 3, 7… днів. Прогрес зберігається на цьому пристрої</li>
         </ul>
       </details>
+    </div>
+  </div>
+
+  <!-- Тренування за темою -->
+  <div class="screen hidden" id="screen-topics">
+    <div class="card menu">
+      <h1>📖 За темою</h1>
+      <p class="sub">Усі офіційні питання однієї теми підряд — з правильною відповіддю й статтею закону після кожного.</p>
+      <div class="topics" id="topics"></div>
+      <button class="btn-secondary" id="btn-topics-back">← До меню</button>
     </div>
   </div>
 
@@ -85,6 +106,7 @@
         <div class="quiz-tag" id="quiz-tag">Ситуація</div>
         <div class="quiz-meta" id="quiz-meta"></div>
         <button class="quiz-lang" id="quiz-lang" aria-label="Мова питання">PL</button>
+        <button class="quiz-close hidden" id="quiz-close" aria-label="Завершити">✕</button>
       </div>
       <div class="quiz-timer hidden" id="quiz-timer">
         <div class="quiz-timer-track"><div class="quiz-timer-bar" id="quiz-timer-bar"></div></div>
@@ -93,6 +115,7 @@
       <img class="quiz-img hidden" id="quiz-img" alt="Фото до питання з офіційної бази" />
       <h2 id="quiz-text">…</h2>
       <div class="options" id="quiz-options"></div>
+      <button class="btn-primary hidden" id="quiz-next">Наступне питання →</button>
       <div class="feedback hidden" id="quiz-feedback">
         <div class="fb-title" id="fb-title"></div>
         <div class="fb-text" id="fb-text"></div>
