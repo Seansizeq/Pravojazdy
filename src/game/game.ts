@@ -8,6 +8,7 @@ import {
   dirBetween, headingDir, sameCell, type Actor3D, type Rail3D, type RoadGrid, type Sign3D,
 } from '../world/build';
 import { makeBeacon, makePerson, mat } from '../world/models';
+import { setSignAnisotropy } from '../world/signs';
 import { findRoute } from '../world/paths';
 import { THEME_LOOK } from '../world/themes';
 import { Autopilot, type AutoObstacle } from './autopilot';
@@ -15,7 +16,8 @@ import { Car } from './car';
 import { Input } from './input';
 import { Minimap } from './minimap';
 import { Navigator, type Maneuver } from './nav';
-import { AdaptiveQuality, type Tier } from './quality';
+import type { PostFX } from './post';
+import { AdaptiveQuality, PRESETS, type Preset, type Tier } from './quality';
 import { progress } from './progress';
 import { ALL_IDS, EXAM_MAX, EXAM_PASS, examSet, reviewSet, topicSet, topics, type StudyKind } from './study';
 import { Traffic } from './traffic';
@@ -107,6 +109,24 @@ function loadFlag(key: string, fallback: boolean) {
   }
 }
 
+/** Налаштування графіки, обране гравцем (за замовчуванням — «Авто»). */
+function loadPreset(): Preset {
+  try {
+    const v = localStorage.getItem('pdrpl.gfx') as Preset | null;
+    return v && PRESETS.includes(v) ? v : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function savePreset(p: Preset) {
+  try {
+    localStorage.setItem('pdrpl.gfx', p);
+  } catch {
+    /* приватний режим */
+  }
+}
+
 function saveFlag(key: string, v: boolean) {
   try {
     localStorage.setItem(key, v ? '1' : '0');
@@ -139,6 +159,10 @@ export class Game {
   private headlights = new THREE.SpotLight(0xfff2cc, 0, 70, 0.55, 0.6, 1.2);
   private clock = new THREE.Clock();
   private quality: AdaptiveQuality;
+  /** обробка кадру для «Ультра» (модуль вантажиться лише тоді, коли вона потрібна) */
+  private post: PostFX | null = null;
+  private postWanted = false;
+  private postLoading = false;
   /** перемалювати сцену, навіть якщо вона зараз нерухома (змінився розмір canvas) */
   private redraw = true;
   /** куди світить сонце: центр карти тіней, прив'язаний до її текселів */
@@ -206,9 +230,8 @@ export class Game {
   constructor(canvas: HTMLCanvasElement) {
     // на телефонах — менша карта тіней; роздільність підлаштовується під FPS (див. AdaptiveQuality)
     const phone = window.matchMedia('(pointer: coarse)').matches;
-    this.quality = new AdaptiveQuality(window.devicePixelRatio || 1, phone);
+    this.quality = new AdaptiveQuality(window.devicePixelRatio || 1, phone, loadPreset());
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.applyQuality(this.quality.tier);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -220,16 +243,13 @@ export class Game {
     this.headlights.position.set(0, 1.2, -1.5);
     this.headlights.target.position.set(0, 0, -25);
     this.car.obj.add(this.headlights, this.headlights.target);
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(phone ? 1024 : 2048, phone ? 1024 : 2048);
     const sc = this.sun.shadow.camera;
-    sc.left = sc.bottom = -60;
-    sc.right = sc.top = 60;
     sc.near = 1;
     sc.far = 200;
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target, this.world);
+    this.applyQuality(this.quality.tier);
 
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -299,6 +319,7 @@ export class Game {
     this.sun.intensity = look.sun;
     this.sun.color.setHex(look.sunColor);
     const night = w === 'night';
+    this.post?.setLook(w);
     this.headlights.intensity = night ? 60 : 0;
     // вимкнена фара — поза сценою: інакше кожен піксель усе одно рахує її світло
     this.headlights.visible = night;
@@ -530,6 +551,9 @@ export class Game {
     on('btn-auto-pause', toggleAuto);
     on('opt-auto', toggleAuto);
     on('btn-timer-pause', toggleTimer);
+    on('opt-gfx', () => this.cycleGraphics());
+    on('btn-gfx-pause', () => this.cycleGraphics());
+    this.ui.setGraphics(this.quality.preset, this.quality.tier);
     on('opt-timer', toggleTimer);
     this.ui.setOptions(this.autoOn, this.timerOn);
     this.ui.onNavClick(() => {
@@ -588,6 +612,7 @@ export class Game {
       `Відповіді: ${this.correct} з ${this.asked} · Порушень: ${this.violations.length}`,
     ];
     if (free) lines.push(`Досягнуто цілей: ${this.goalsReached}`);
+    if (this.quality.fps) lines.push(`Плавність: ~${Math.round(this.quality.fps)} кадрів/с`);
     this.ui.setPause(lines.join('<br>'), this.questionsOn, free);
     this.ui.setOptions(this.autoOn, this.timerOn);
   }
@@ -595,6 +620,7 @@ export class Game {
   private resize() {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h, false);
+    this.post?.resize();
     this.redraw = true;
     this.camera.aspect = w / h;
     // на вузьких (портретних) екранах — ширший кут, щоб бачити дорогу попереду,
@@ -1223,7 +1249,10 @@ export class Game {
     this.redraw = false;
     if (!still) {
       const tier = this.quality.update(raw);
-      if (tier) this.applyQuality(tier);
+      if (tier) {
+        this.applyQuality(tier);
+        this.ui.setGraphics(this.quality.preset, tier);
+      }
     }
 
     this.updateCamera(dt);
@@ -1235,7 +1264,8 @@ export class Game {
       this.traffic.cars.map((c) => ({ x: c.obj.position.x, z: c.obj.position.z })),
       this.time,
     );
-    this.renderer.render(this.scene, this.camera);
+    if (this.post && this.postWanted) this.post.render();
+    else this.renderer.render(this.scene, this.camera);
   }
 
   private updateCamera(dt: number) {
@@ -1264,11 +1294,45 @@ export class Game {
     this.sun.target.position.copy(this.sunAt);
   }
 
-  /** Роздільність і тіні під силу пристрою. */
+  /** Роздільність, тіні й обробка кадру під налаштування графіки. */
   private applyQuality(t: Tier) {
     this.renderer.setPixelRatio(t.ratio);
     // без тіней сонце не кидає їх зовсім: зникає і прохід карти тіней, і її вибірка в шейдерах
-    this.sun.castShadow = t.shadows;
+    this.sun.castShadow = t.shadows > 0;
+    const shadow = this.sun.shadow;
+    if (t.shadows && shadow.mapSize.x !== t.shadows) {
+      shadow.mapSize.set(t.shadows, t.shadows);
+      shadow.map?.dispose();
+      shadow.map = null;
+      // більша карта — і чіткіші тіні, і далі від авто
+      const r = t.shadows >= 4096 ? 85 : 60;
+      const sc = shadow.camera;
+      sc.left = sc.bottom = -r;
+      sc.right = sc.top = r;
+      sc.updateProjectionMatrix();
+    }
+    // ультра — найчіткіші текстури знаків під кутом (наскільки дозволяє відеокарта)
+    setSignAnisotropy(t.post ? Math.min(16, this.renderer.capabilities.getMaxAnisotropy()) : 4);
+    this.postWanted = t.post;
+    if (t.post && !this.post && !this.postLoading) {
+      this.postLoading = true;
+      import('./post').then(({ PostFX }) => {
+        this.post = new PostFX(this.renderer, this.scene, this.camera);
+        this.post.resize();
+        this.applyWeather(this.weatherNow);
+        this.quality.hold();
+        this.redraw = true;
+      });
+    }
+    this.post?.resize();
     this.redraw = true;
+  }
+
+  /** Наступне налаштування графіки по колу: Авто → Ультра → Висока → Середня → Низька. */
+  private cycleGraphics() {
+    const p = PRESETS[(PRESETS.indexOf(this.quality.preset) + 1) % PRESETS.length];
+    savePreset(p);
+    this.applyQuality(this.quality.setPreset(p));
+    this.ui.setGraphics(p, this.quality.tier);
   }
 }

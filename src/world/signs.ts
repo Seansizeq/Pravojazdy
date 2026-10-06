@@ -917,6 +917,19 @@ export function drawSign(ctx: Ctx, s: number, type: SignType) {
 }
 
 const texCache = new Map<SignType, THREE.CanvasTexture>();
+/** анізотропна фільтрація текстур знаків і табличок: що більша, то чіткіші написи під кутом */
+let anisotropy = 4;
+
+/** Якість текстур знаків під налаштування графіки (вже створені теж оновлюються). */
+export function setSignAnisotropy(n: number) {
+  if (n === anisotropy) return;
+  anisotropy = n;
+  const all = [...texCache.values(), ...[...tabMats.values()].map((m) => m.map!)];
+  for (const t of all) {
+    t.anisotropy = n;
+    t.needsUpdate = true;
+  }
+}
 
 function signTexture(type: SignType) {
   let t = texCache.get(type);
@@ -926,7 +939,7 @@ function signTexture(type: SignType) {
     drawSign(c.getContext('2d')!, 256, type);
     t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 4;
+    t.anisotropy = anisotropy;
     texCache.set(type, t);
   }
   return t;
@@ -975,6 +988,7 @@ function tablet(textValue: string, yellow: boolean, y: number) {
     ctx.fillText(textValue, 128, 44);
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = anisotropy;
     m = new THREE.MeshBasicMaterial({ map: t, side: THREE.DoubleSide });
     tabMats.set(key, m);
   }

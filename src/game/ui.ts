@@ -1,5 +1,6 @@
 import type { Level, Question } from '../types';
 import type { Summary } from './progress';
+import { PRESET_NAME, tierName, type Preset, type Tier } from './quality';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -236,6 +237,14 @@ export class UI {
     $('opt-timer').classList.toggle('on', timerOn);
     $('btn-timer-pause').classList.toggle('on', timerOn);
     $('controls').classList.toggle('auto', autoOn);
+  }
+
+  /** Налаштування графіки в меню й на паузі; для «Авто» — ще й рівень, на якому вона зараз. */
+  setGraphics(p: Preset, t: Tier) {
+    const now = p === 'auto' ? ` · ${PRESET_NAME[tierName(t)].toLowerCase()}` : '';
+    const text = `🎨 Графіка: ${PRESET_NAME[p]}${now}`;
+    $('opt-gfx').textContent = text;
+    $('btn-gfx-pause').textContent = text;
   }
 
   private quizTimer = 0;
